@@ -29,6 +29,7 @@ from c_adamw import AdamW as C_AdamW
 from lion import Lion
 from c_lion import Lion as C_Lion
 from c_adafactor import Adafactor as C_Adafactor
+from mup import MuReadout, MuAdam, MuSGD, set_base_shapes
 
 transformers.logging.set_verbosity_error()
 
@@ -239,6 +240,15 @@ def main(args):
     else:
         model = model.to(device=device)
 
+    # prepare model for mup
+    if args.mup:
+        model.lm_head = MuReadout(model_config.hidden_size, model_config.vocab_size).to(device)
+        dummy_input = (
+            torch.randint(low = 0, high = model_config.vocab_size, size = (args.batch_size, args.max_length)),
+        )
+        dummy_out = model(**dummy_input)
+        set_base_shapes(model)
+    
     n_total_params = sum(p.numel() for p in model.parameters())
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     # Initialize wandb
@@ -268,12 +278,21 @@ def main(args):
     
     layer_wise_flag = False
     if args.optimizer.lower() == "adamw":
-        optimizer = torch.optim.AdamW(trainable_params, lr=args.lr, weight_decay=args.weight_decay, betas = args.betas)
+        if not args.mup:
+            optimizer = torch.optim.AdamW(trainable_params, lr=args.lr, weight_decay=args.weight_decay, betas = args.betas)
+        else:
+            optimizer = MuAdam(trainable_params, impl=torch.optim.AdamW, lr=args.lr, weight_decay=args.weight_decay, betas = args.betas)
     elif args.optimizer.lower() == "c_adamw":
-        optimizer = C_AdamW(trainable_params, lr=args.lr, weight_decay=args.weight_decay, betas = args.betas)
+        if not args.mup:
+            optimizer = C_AdamW(trainable_params, lr=args.lr, weight_decay=args.weight_decay, betas = args.betas)
+        else:
+            optimizer = MuAdam(trainable_params, impl=C_AdamW, lr=args.lr, weight_decay=args.weight_decay, betas = args.betas)
     # implement sgd
     elif args.optimizer.lower() == "sgd":
-        optimizer = torch.optim.SGD(trainable_params, lr=args.lr, weight_decay=args.weight_decay, momentum=args.beta1)
+        if not args.mup:
+            optimizer = torch.optim.SGD(trainable_params, lr=args.lr, weight_decay=args.weight_decay, momentum=args.beta1)
+        else:
+            optimizer = MuSGD(trainable_params, lr=args.lr, weight_decay=args.weight_decay, momentum=args.beta1)
     # implement adafactor
     elif args.optimizer.lower() == "adafactor":
         args.beta1 = None if args.beta1 == 0.0 else args.beta1

@@ -12,3 +12,4 @@ bitsandbytes
 scipy
 scikit-learn
 evaluate
+mup
